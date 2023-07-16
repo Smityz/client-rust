@@ -18,6 +18,7 @@ use crate::raw::lowering::*;
 use crate::request::Collect;
 use crate::request::CollectSingle;
 use crate::request::Plan;
+use crate::store::RegionStore;
 use crate::Backoff;
 use crate::BoundRange;
 use crate::ColumnFamily;
@@ -592,29 +593,59 @@ impl<PdC: PdClient> Client<PdC> {
                 max_limit: MAX_RAW_KV_SCAN_LIMIT,
             });
         }
-
-        let mut result : Vec<KvPair> = Vec::new();
+        let mut result: Vec<KvPair> = Vec::new();
         let range = range.into();
-
-        let mut scan_regions = self
-            .rpc
-            .clone()
-            .stores_for_range(range.clone())
-            .boxed();
-
-
-        let region_store = scan_regions
-            .next()
-            .await
-            .ok_or(Error::RegionForRangeNotFound { range: (range.clone()) })??;
-
-        let request = new_raw_scan_request(range.clone(), limit, key_only, self.cf.clone());
-        let plan = crate::request::PlanBuilder::new(self.rpc.clone(), request)
-            .single_region_with_store(region_store)
-            .await?
-            .plan();
-        let res = plan.execute().await?;
-        result = res.kvs.into_iter().map(Into::into).collect::<Vec<KvPair>>();
+        let now_range = range.clone();
+        let mut scan_regions = self.rpc.clone().stores_for_range(range.clone()).boxed();
+        let mut region_store =
+            scan_regions
+                .next()
+                .await
+                .ok_or(Error::RegionForRangeNotFound {
+                    range: (range.clone()),
+                })??;
+        let mut region_scan_res: Vec<KvPair>;
+        let mut tot_limit = limit;
+        while tot_limit > 0 {
+            println!("region store range:{:?}", region_store.region_with_leader);
+            let request = new_raw_scan_request(range.clone(), limit, key_only, self.cf.clone());
+            let plan = crate::request::PlanBuilder::new(self.rpc.clone(), request)
+                .single_region_with_store(region_store.clone())
+                .await?
+                .plan();
+            let resp = plan.execute().await?;
+            region_scan_res = resp
+                .kvs
+                .into_iter()
+                .map(Into::into)
+                .collect::<Vec<KvPair>>();
+            // println!("region_scan_res: {:?}", region_scan_res);
+            region_scan_res.iter().for_each(|kv| {
+                println!("kv: {:?}", <Key as Into<Vec<u8>>>::into(kv.clone().0));
+            });
+            // scan in single region may return empty result, so we need to get the next region
+            let next_key = match region_scan_res.last() {
+                Some(kv) => kv.key().clone(),
+                None => region_store.region_with_leader.range().1,
+            };
+            println!("next_key: {:?}", next_key);
+            let res_len = region_scan_res.len();
+            // if the number of results is less than limit, it means this scan range contains more than one region
+            if res_len < limit as usize {
+                region_store =
+                    scan_regions
+                        .next()
+                        .await
+                        .ok_or(Error::RegionForRangeNotFound {
+                            range: BoundRange {
+                                from: std::ops::Bound::Included(next_key),
+                                to: now_range.clone().to,
+                            },
+                        })??;
+            }
+            tot_limit -= res_len as u32;
+            result.append(&mut region_scan_res);
+        }
         Ok(result)
     }
 
@@ -707,21 +738,26 @@ mod tests {
             .into_iter()
             .map(|(data, ranges)| (String::from_utf8(data).unwrap(), ranges))
             .collect();
-        assert_eq!(resps, vec![
-            ("1:[Key(05)..Key(0A)]".to_string(), vec![
-                Key::from(vec![5])..Key::from(vec![10])
-            ]),
-            (
-                "2:[Key(0A)..Key(0F), Key(14)..Key(FAFA)]".to_string(),
-                vec![
-                    Key::from(vec![10])..Key::from(vec![15]),
-                    Key::from(vec![20])..Key::from(vec![250, 250])
-                ]
-            ),
-            ("3:[Key(FAFA)..Key()]".to_string(), vec![
-                Key::from(vec![250, 250])..Key::from(vec![])
-            ])
-        ]);
+        assert_eq!(
+            resps,
+            vec![
+                (
+                    "1:[Key(05)..Key(0A)]".to_string(),
+                    vec![Key::from(vec![5])..Key::from(vec![10])]
+                ),
+                (
+                    "2:[Key(0A)..Key(0F), Key(14)..Key(FAFA)]".to_string(),
+                    vec![
+                        Key::from(vec![10])..Key::from(vec![15]),
+                        Key::from(vec![20])..Key::from(vec![250, 250])
+                    ]
+                ),
+                (
+                    "3:[Key(FAFA)..Key()]".to_string(),
+                    vec![Key::from(vec![250, 250])..Key::from(vec![])]
+                )
+            ]
+        );
         Ok(())
     }
 }
