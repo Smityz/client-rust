@@ -568,6 +568,7 @@ async fn raw_write_million() -> Result<()> {
     init().await?;
     let client = RawClient::new(pd_addrs()).await?;
 
+    let mut tot_key = 0;
     for i in 0..2u32.pow(NUM_BITS_TXN) {
         let mut cur = i * 2u32.pow(32 - NUM_BITS_TXN);
         let keys = iter::repeat_with(|| {
@@ -585,16 +586,20 @@ async fn raw_write_million() -> Result<()> {
                     .zip(iter::repeat(1u32.to_be_bytes().to_vec())),
             )
             .await?;
+        tot_key += keys.len();
+        println!("keys: {:?}", keys);
 
         let res = client.batch_get(keys).await?;
         assert_eq!(res.len(), 2usize.pow(NUM_BITS_KEY_PER_TXN));
     }
-
+    println!("tot_key: {:?}", tot_key);
     // test scan
-    let limit = 10;
-    let res = client.scan(vec![].., limit).await?;
-    assert_eq!(res.len(), limit as usize);
-
+    let limit = 2000;
+    client.scan(vec![114,0,0,1].., limit).await?.iter().for_each(|kvp| {
+        let kvpp : Vec<u8> = kvp.0.clone().into();
+        println!("k: {:?}", kvpp);
+    });
+    assert_eq!(0, limit as usize);
     // test batch_scan
     for batch_num in 1..4 {
         let _ = client

@@ -5,6 +5,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::u32;
 
+use futures::StreamExt;
 use log::debug;
 
 use crate::backoff::DEFAULT_REGION_BACKOFF;
@@ -592,16 +593,29 @@ impl<PdC: PdClient> Client<PdC> {
             });
         }
 
-        let request = new_raw_scan_request(range.into(), limit, key_only, self.cf.clone());
+        let mut result : Vec<KvPair> = Vec::new();
+        let range = range.into();
+
+        let mut scan_regions = self
+            .rpc
+            .clone()
+            .stores_for_range(range.clone())
+            .boxed();
+
+
+        let region_store = scan_regions
+            .next()
+            .await
+            .ok_or(Error::RegionForRangeNotFound { range: (range.clone()) })??;
+
+        let request = new_raw_scan_request(range.clone(), limit, key_only, self.cf.clone());
         let plan = crate::request::PlanBuilder::new(self.rpc.clone(), request)
-            .retry_multi_region(self.backoff.clone())
-            .merge(Collect)
+            .single_region_with_store(region_store)
+            .await?
             .plan();
-        let res = plan.execute().await;
-        res.map(|mut s| {
-            s.truncate(limit as usize);
-            s
-        })
+        let res = plan.execute().await?;
+        result = res.kvs.into_iter().map(Into::into).collect::<Vec<KvPair>>();
+        Ok(result)
     }
 
     async fn batch_scan_inner(
