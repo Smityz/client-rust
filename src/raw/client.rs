@@ -603,9 +603,7 @@ impl<PdC: PdClient> Client<PdC> {
                     range: (range.clone()),
                 })??;
         while limit > 0 {
-            // println!("region store range:{:?}", region_store.region_with_leader);
             let request = new_raw_scan_request(range.clone(), limit, key_only, self.cf.clone());
-            // println!("request:{:?}", request);
             let resp = crate::request::PlanBuilder::new(self.rpc.clone(), request)
                 .single_region_with_store(region_store.clone())
                 .await?
@@ -617,12 +615,9 @@ impl<PdC: PdClient> Client<PdC> {
                 .into_iter()
                 .map(Into::into)
                 .collect::<Vec<KvPair>>();
-            // region_scan_res.iter().for_each(|kv| {
-            //     println!("kv: {:?}", <Key as Into<Vec<u8>>>::into(kv.clone().0));
-            // });
             let res_len = region_scan_res.len();
             result.append(&mut region_scan_res);
-            // if the number of results is less than limit, it means this scan range contains more than one region
+            // if the number of results is less than limit, it means this scan range contains more than one region, so we need to scan next region
             if res_len < limit as usize {
                 region_store = match scan_regions.next().await {
                     Some(Ok(rs)) => {

@@ -14,7 +14,6 @@
 mod common;
 use std::collections::HashMap;
 use std::iter;
-use std::println;
 
 use common::*;
 use futures::prelude::*;
@@ -569,7 +568,6 @@ async fn raw_write_million() -> Result<()> {
     init().await?;
     let client = RawClient::new(pd_addrs()).await?;
 
-    let mut tot_key = 0;
     for i in 0..2u32.pow(NUM_BITS_TXN) {
         let mut cur = i * 2u32.pow(32 - NUM_BITS_TXN);
         let keys = iter::repeat_with(|| {
@@ -587,17 +585,12 @@ async fn raw_write_million() -> Result<()> {
                     .zip(iter::repeat(1u32.to_be_bytes().to_vec())),
             )
             .await?;
-        tot_key += keys.len();
 
         let res = client.batch_get(keys).await?;
         assert_eq!(res.len(), 2usize.pow(NUM_BITS_KEY_PER_TXN));
     }
-    println!("tot_key: {:?}", tot_key);
-    // test scan
-    // r.iter().for_each(|kvp| {
-    //     let kvpp: Vec<u8> = kvp.0.clone().into();
-    //     println!("k: {:?}", kvpp);
-    // });
+
+    // test scan, key range from [0,0,0,0] to [255.0.0.0]
     let mut limit = 2000;
     let mut r = client.scan(.., limit).await?;
     assert_eq!(r.len(), 256);

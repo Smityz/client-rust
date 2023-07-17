@@ -30,7 +30,7 @@ doc:
 	cargo doc --workspace --exclude tikv-client-proto --document-private-items --no-deps
 
 tiup:
-	tiup playground v6.5.3 --mode tikv-slim  --without-monitor --kv.config $(shell pwd)/config/tikv.toml --pd.config $(shell pwd)/config/pd.toml &
+	tiup playground nightly --mode tikv-slim --kv 3 --without-monitor --kv.config $(shell pwd)/config/tikv.toml --pd.config $(shell pwd)/config/pd.toml &
 
 all: check doc test
 
