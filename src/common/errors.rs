@@ -83,7 +83,7 @@ pub enum Error {
     #[error("Region is not found for key: {:?}", key)]
     RegionForKeyNotFound { key: Vec<u8> },
     #[error("Region is not found for range: {:?}", range)]
-    RegionForRangeNotFound{ range: BoundRange },
+    RegionForRangeNotFound { range: BoundRange },
     /// No region is found for the given id. note: distinguish it with the RegionNotFound error in errorpb.
     #[error("Region {} is not found in the response", region_id)]
     RegionNotFoundInResponse { region_id: u64 },
