@@ -594,8 +594,7 @@ impl<PdC: PdClient> Client<PdC> {
             });
         }
         let mut result: Vec<KvPair> = Vec::new();
-        let range = range.into();
-        let now_range = range.clone();
+        let mut range = range.into();
         let mut scan_regions = self.rpc.clone().stores_for_range(range.clone()).boxed();
         let mut region_store =
             scan_regions
@@ -609,6 +608,7 @@ impl<PdC: PdClient> Client<PdC> {
         while tot_limit > 0 {
             println!("region store range:{:?}", region_store.region_with_leader);
             let request = new_raw_scan_request(range.clone(), limit, key_only, self.cf.clone());
+            println!("request:{:?}", request);
             let plan = crate::request::PlanBuilder::new(self.rpc.clone(), request)
                 .single_region_with_store(region_store.clone())
                 .await?
@@ -619,32 +619,32 @@ impl<PdC: PdClient> Client<PdC> {
                 .into_iter()
                 .map(Into::into)
                 .collect::<Vec<KvPair>>();
-            // println!("region_scan_res: {:?}", region_scan_res);
             region_scan_res.iter().for_each(|kv| {
                 println!("kv: {:?}", <Key as Into<Vec<u8>>>::into(kv.clone().0));
             });
             // scan in single region may return empty result, so we need to get the next region
-            let next_key = match region_scan_res.last() {
-                Some(kv) => kv.key().clone(),
-                None => region_store.region_with_leader.range().1,
-            };
-            println!("next_key: {:?}", next_key);
+            // let next_key = match region_scan_res.last() {
+            //     Some(kv) => kv.key().clone(),
+            //     None => region_store.region_with_leader.range().1,
+            // };
+            // println!("next_key: {:?}", next_key);
             let res_len = region_scan_res.len();
+            result.append(&mut region_scan_res);
             // if the number of results is less than limit, it means this scan range contains more than one region
             if res_len < limit as usize {
-                region_store =
-                    scan_regions
-                        .next()
-                        .await
-                        .ok_or(Error::RegionForRangeNotFound {
-                            range: BoundRange {
-                                from: std::ops::Bound::Included(next_key),
-                                to: now_range.clone().to,
-                            },
-                        })??;
+                let rr = scan_regions .next() .await;
+                region_store = match rr {
+                    Some(Ok(rs)) => {
+                        range = BoundRange::new(std::ops::Bound::Included(region_store.region_with_leader.range().1), range.to);
+                        rs
+                    },
+                    Some(Err(e)) => return Err(e),
+                    None => {
+                        return Ok(result);
+                    }
+                };
             }
             tot_limit -= res_len as u32;
-            result.append(&mut region_scan_res);
         }
         Ok(result)
     }

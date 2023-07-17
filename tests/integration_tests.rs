@@ -595,11 +595,12 @@ async fn raw_write_million() -> Result<()> {
     println!("tot_key: {:?}", tot_key);
     // test scan
     let limit = 2000;
-    client.scan(vec![114,0,0,1].., limit).await?.iter().for_each(|kvp| {
-        let kvpp : Vec<u8> = kvp.0.clone().into();
-        println!("k: {:?}", kvpp);
-    });
-    assert_eq!(0, limit as usize);
+    // client.scan(vec![0,0,0,0].., limit).await?.iter().for_each(|kvp| {
+    //     let kvpp : Vec<u8> = kvp.0.clone().into();
+    //     // println!("k: {:?}", kvpp);
+    // });
+    let r = client.scan(vec![0,0,0,0].., limit).await?;
+    assert_eq!(r.len(), 256);
     // test batch_scan
     for batch_num in 1..4 {
         let _ = client
